@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SHINOBI VISION</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+  <style>
+    :root {
+      --naruto: #ff6a00;
+      --naruto-glow: #ff9500;
+      --sasuke: #7b2fff;
+      --sasuke-glow: #c084fc;
+      --cyan: #00f5ff;
+      --cyan-dim: rgba(0,245,255,0.15);
+      --hud-bg: rgba(0,0,0,0.55);
+      --hud-border: rgba(0,245,255,0.25);
+      --panel-glass: rgba(0,10,20,0.6);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      overflow: hidden;
+      background: #000;
+      font-family: 'Rajdhani', sans-serif;
+      cursor: none;
+    }
+
+    #v_src, #out {
+      position: absolute; top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+    #out { z-index: 2; pointer-events: none; }
+
+    .darkness {
+      position: absolute; top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      background: rgba(5, 2, 10, 0.35);
+      mix-blend-mode: multiply;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    .fx {
+      position: absolute; height: auto; top: 0; left: 0;
+      transform: translate(-50%, -50%);
+      pointer-events: none; display: none;
+      mix-blend-mode: screen; z-index: 20;
+    }
+    #n { width: 1600px; }
+    #s { width: 2400px; }
+
+    .scanline {
+      position: absolute; top: 0; left: 0;
+      width: 100vw; height: 4px;
+      background: linear-gradient(transparent, rgba(0,245,255,0.12), transparent);
+      z-index: 8;
+      pointer-events: none;
+      animation: scan 4s linear infinite;
+    }
+    @keyframes scan {
+      0% { top: -4px; }
+      100% { top: 100vh; }
+    }
+
+    .scanlines-overlay {
+      position: absolute; top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.08) 2px,
+        rgba(0,0,0,0.08) 4px
+      );
+      pointer-events: none;
+      z-index: 7;
+    }
+
+    .vignette {
+      position: absolute; top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.85) 100%);
+      pointer-events: none;
+      z-index: 6;
+    }
+
+    .corner {
+      position: absolute;
+      width: 40px; height: 40px;
+      pointer-events: none;
+      z-index: 30;
+    }
+    .corner::before, .corner::after {
+      content: '';
+      position: absolute;
+      background: var(--cyan);
+      box-shadow: 0 0 8px var(--cyan);
+    }
+    .corner::before { width: 2px; height: 100%; }
+    .corner::after { width: 100%; height: 2px; }
+    .corner.tl { top: 16px; left: 16px; }
+    .corner.tl::before { top: 0; left: 0; }
+    .corner.tl::after { top: 0; left: 0; }
+    .corner.tr { top: 16px; right: 16px; transform: scaleX(-1); }
+    .corner.tr::before { top: 0; left: 0; }
+    .corner.tr::after { top: 0; left: 0; }
+    .corner.bl { bottom: 16px; left: 16px; transform: scaleY(-1); }
+    .corner.bl::before { top: 0; left: 0; }
+    .corner.bl::after { top: 0; left: 0; }
+    .corner.br { bottom: 16px; right: 16px; transform: scale(-1,-1); }
+    .corner.br::before { top: 0; left: 0; }
+    .corner.br::after { top: 0; left: 0; }
+
+    .hud-top {
+      position: absolute;
+      top: 0; left: 50%;
+      transform: translateX(-50%);
+      z-index: 30;
+      text-align: center;
+      padding: 18px 60px 14px;
+      background: linear-gradient(180deg, rgba(0,10,20,0.85) 0%, transparent 100%);
+      border-bottom: 1px solid var(--hud-border);
+      min-width: 420px;
+      clip-path: polygon(10% 0%, 90% 0%, 100% 100%, 0% 100%);
+    }
+    .hud-top .title {
+      font-family: 'Orbitron', monospace;
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: 8px;
+      text-transform: uppercase;
+      color: #fff;
+      text-shadow: 0 0 20px var(--cyan), 0 0 40px rgba(0,245,255,0.4);
+      animation: titlePulse 3s ease-in-out infinite;
+    }
+    @keyframes titlePulse {
+      0%, 100% { text-shadow: 0 0 20px var(--cyan), 0 0 40px rgba(0,245,255,0.4); }
+      50% { text-shadow: 0 0 30px var(--cyan), 0 0 60px rgba(0,245,255,0.7), 0 0 80px rgba(0,245,255,0.2); }
+    }
+    .hud-top .subtitle {
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 11px;
+      letter-spacing: 4px;
+      color: rgba(0,245,255,0.6);
+      margin-top: 3px;
+      text-transform: uppercase;
+    }
+
+    .hud-left, .hud-right {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 30;
+      width: 200px;
+    }
+    .hud-left { left: 20px; }
+    .hud-right { right: 20px; }
+
+    .power-panel {
+      background: var(--panel-glass);
+      border: 1px solid var(--hud-border);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      padding: 16px 18px;
+      position: relative;
+      overflow: hidden;
+    }
+    .power-panel::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0;
+      right: 0; height: 1px;
+    }
+    .hud-left .power-panel::before {
+      background: linear-gradient(90deg, var(--naruto), transparent);
+      box-shadow: 0 0 10px var(--naruto);
+    }
+    .hud-right .power-panel::before {
+      background: linear-gradient(90deg, transparent, var(--sasuke));
+      box-shadow: 0 0 10px var(--sasuke);
+    }
+
+    .panel-label {
+      font-family: 'Orbitron', monospace;
+      font-size: 9px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .hud-left .panel-label { color: var(--naruto-glow); }
+    .hud-right .panel-label { color: var(--sasuke-glow); }
+
+    .panel-label .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      animation: dotBlink 1.5s ease-in-out infinite;
+    }
+    .hud-left .panel-label .dot {
+      background: var(--naruto);
+      box-shadow: 0 0 8px var(--naruto);
+    }
+    .hud-right .panel-label .dot {
+      background: var(--sasuke);
+      box-shadow: 0 0 8px var(--sasuke);
+    }
+    @keyframes dotBlink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .char-name {
+      font-family: 'Orbitron', monospace;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+    .char-jutsu {
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    .hud-left .char-jutsu { color: rgba(255,106,0,0.7); }
+    .hud-right .char-jutsu { color: rgba(123,47,255,0.7); }
+
+    .bar-wrap {
+      width: 100%;
+      height: 6px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 8px;
+      position: relative;
+    }
+    .bar-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 3px;
+      transition: width 0.1s linear;
+      position: relative;
+    }
+    .hud-left .bar-fill {
+      background: linear-gradient(90deg, #ff6a00, #ffb347);
+      box-shadow: 0 0 10px var(--naruto), 0 0 20px rgba(255,106,0,0.5);
+    }
+    .hud-right .bar-fill {
+      background: linear-gradient(90deg, #7b2fff, #c084fc);
+      box-shadow: 0 0 10px var(--sasuke), 0 0 20px rgba(123,47,255,0.5);
+    }
+    .bar-fill::after {
+      content: '';
+      position: absolute;
+      top: 0; right: 0;
+      width: 4px; height: 100%;
+      background: rgba(255,255,255,0.8);
+      filter: blur(2px);
+    }
+
+    .pct-label {
+      font-family: 'Orbitron', monospace;
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+      text-align: right;
+    }
+    .hud-left .pct-label { color: var(--naruto-glow); text-shadow: 0 0 10px var(--naruto); }
+    .hud-right .pct-label { color: var(--sasuke-glow); text-shadow: 0 0 10px var(--sasuke); }
+
+    .status-text {
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-top: 6px;
+      transition: color 0.3s;
+    }
+    .hud-left .status-text { color: rgba(255,149,0,0.5); }
+    .hud-right .status-text { color: rgba(192,132,252,0.5); }
+    .status-text.active { animation: statusFlash 0.5s ease-in-out infinite alternate; }
+    .hud-left .status-text.active { color: var(--naruto-glow); }
+    .hud-right .status-text.active { color: var(--sasuke-glow); }
+    @keyframes statusFlash {
+      from { opacity: 0.7; }
+      to { opacity: 1; }
+    }
+
+    .hud-bottom {
+      position: absolute;
+      bottom: 0; left: 50%;
+      transform: translateX(-50%);
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      padding: 14px 40px 18px;
+      background: linear-gradient(0deg, rgba(0,10,20,0.85) 0%, transparent 100%);
+      border-top: 1px solid var(--hud-border);
+      clip-path: polygon(5% 0%, 95% 0%, 100% 100%, 0% 100%);
+    }
+    .hud-stat {
+      text-align: center;
+    }
+    .hud-stat .s-val {
+      font-family: 'Orbitron', monospace;
+      font-size: 13px;
+      color: var(--cyan);
+      text-shadow: 0 0 8px var(--cyan);
+      font-weight: 700;
+    }
+    .hud-stat .s-label {
+      font-size: 9px;
+      letter-spacing: 2px;
+      color: rgba(255,255,255,0.35);
+      text-transform: uppercase;
+    }
+    .hud-sep {
+      width: 1px;
+      height: 30px;
+      background: linear-gradient(180deg, transparent, var(--hud-border), transparent);
+    }
+
+    .hand-indicator {
+      position: absolute;
+      bottom: 90px;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .hand-indicator.left-ind { left: 20px; }
+    .hand-indicator.right-ind { right: 20px; flex-direction: row-reverse; }
+
+    .hand-icon {
+      width: 28px; height: 28px;
+      border: 1px solid var(--hud-border);
+      border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+      background: var(--panel-glass);
+      backdrop-filter: blur(8px);
+    }
+    .hand-label {
+      font-family: 'Orbitron', monospace;
+      font-size: 8px;
+      letter-spacing: 2px;
+      color: rgba(255,255,255,0.3);
+      text-transform: uppercase;
+    }
+    .hand-indicator.detected .hand-icon {
+      border-color: var(--cyan);
+      box-shadow: 0 0 10px var(--cyan-dim);
+    }
+    .hand-indicator.detected .hand-label { color: var(--cyan); }
+
+    .chakra-particles {
+      position: absolute; top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      pointer-events: none;
+      z-index: 4;
+      overflow: hidden;
+    }
+    .particle {
+      position: absolute;
+      border-radius: 50%;
+      animation: floatUp linear infinite;
+      opacity: 0;
+    }
+    @keyframes floatUp {
+      0% { transform: translateY(0) translateX(0) scale(0); opacity: 0; }
+      10% { opacity: 1; }
+      80% { opacity: 0.4; }
+      100% { transform: translateY(-100vh) translateX(calc(var(--drift) * 1px)) scale(1.5); opacity: 0; }
+    }
+
+    #loading-screen {
+      position: fixed; top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      background: #000;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.8s ease;
+    }
+    #loading-screen.fade-out { opacity: 0; pointer-events: none; }
+
+    .load-title {
+      font-family: 'Orbitron', monospace;
+      font-size: 32px;
+      font-weight: 900;
+      letter-spacing: 12px;
+      color: #fff;
+      text-shadow: 0 0 30px var(--cyan), 0 0 60px rgba(0,245,255,0.4);
+      margin-bottom: 6px;
+      animation: loadGlow 1s ease-in-out infinite alternate;
+    }
+    @keyframes loadGlow {
+      from { text-shadow: 0 0 20px var(--cyan); }
+      to { text-shadow: 0 0 40px var(--cyan), 0 0 80px rgba(0,245,255,0.5); }
+    }
+    .load-sub {
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 12px;
+      letter-spacing: 5px;
+      color: rgba(0,245,255,0.5);
+      text-transform: uppercase;
+      margin-bottom: 50px;
+    }
+
+    .load-bar-wrap {
+      width: 320px;
+      height: 3px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+    .load-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--naruto), var(--cyan), var(--sasuke));
+      border-radius: 2px;
+      box-shadow: 0 0 12px var(--cyan);
+      animation: loadProgress 2.2s ease-in-out forwards;
+    }
+    @keyframes loadProgress {
+      0% { width: 0%; }
+      30% { width: 45%; }
+      60% { width: 72%; }
+      85% { width: 91%; }
+      100% { width: 100%; }
+    }
+    .load-status {
+      font-family: 'Orbitron', monospace;
+      font-size: 9px;
+      letter-spacing: 3px;
+      color: rgba(0,245,255,0.5);
+      text-transform: uppercase;
+      animation: statusCycle 2.2s steps(1) forwards;
+    }
+    @keyframes statusCycle {
+      0% { content: 'INITIALIZING CHAKRA SYSTEM...'; }
+    }
+
+    .load-decor {
+      display: flex;
+      gap: 40px;
+      margin-top: 50px;
+    }
+    .load-orb {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      animation: orbPulse 0.8s ease-in-out infinite alternate;
+    }
+    .load-orb:nth-child(1) { background: var(--naruto); box-shadow: 0 0 10px var(--naruto); animation-delay: 0s; }
+    .load-orb:nth-child(2) { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); animation-delay: 0.2s; }
+    .load-orb:nth-child(3) { background: var(--sasuke); box-shadow: 0 0 10px var(--sasuke); animation-delay: 0.4s; }
+    @keyframes orbPulse {
+      from { transform: scale(1); opacity: 0.5; }
+      to { transform: scale(1.5); opacity: 1; }
+    }
+
+    .edge-glow-left {
+      position: absolute;
+      left: 0; top: 0;
+      width: 3px; height: 100vh;
+      background: linear-gradient(180deg, transparent, var(--naruto), transparent);
+      opacity: 0.4;
+      z-index: 9;
+      pointer-events: none;
+      animation: edgeFlicker 2s ease-in-out infinite;
+    }
+    .edge-glow-right {
+      position: absolute;
+      right: 0; top: 0;
+      width: 3px; height: 100vh;
+      background: linear-gradient(180deg, transparent, var(--sasuke), transparent);
+      opacity: 0.4;
+      z-index: 9;
+      pointer-events: none;
+      animation: edgeFlicker 2.3s ease-in-out infinite;
+    }
+    @keyframes edgeFlicker {
+      0%, 100% { opacity: 0.25; }
+      50% { opacity: 0.6; }
+    }
+
+    #crosshair {
+      position: absolute;
+      width: 20px; height: 20px;
+      pointer-events: none;
+      z-index: 100;
+      transform: translate(-50%, -50%);
+    }
+    #crosshair::before, #crosshair::after {
+      content: '';
+      position: absolute;
+      background: rgba(0,245,255,0.7);
+    }
+    #crosshair::before { width: 1px; height: 100%; left: 50%; top: 0; }
+    #crosshair::after { width: 100%; height: 1px; top: 50%; left: 0; }
+  </style>
+</head>
+<body>
+
+  <div id="loading-screen">
+    <div class="load-title">SHINOBI</div>
+    <div class="load-sub">忍者 Vision System v2.0</div>
+
+    <img src="assets/loading-bg.png" alt="" style="position:absolute;width:100%;height:100%;object-fit:cover;opacity:0.18;pointer-events:none;top:0;left:0;z-index:0;" onerror="this.style.display='none'">
+
+    <div class="load-bar-wrap">
+      <div class="load-bar-fill"></div>
+    </div>
+    <div class="load-status">INITIALIZING CHAKRA SYSTEM...</div>
+    <div class="load-decor">
+      <div class="load-orb"></div>
+      <div class="load-orb"></div>
+      <div class="load-orb"></div>
+    </div>
+  </div>
+
+  <div id="crosshair"></div>
+
+  <video id="v_src" autoplay playsinline></video>
+  <canvas id="out"></canvas>
+  <div class="darkness"></div>
+  <div class="scanlines-overlay"></div>
+  <div class="vignette"></div>
+  <div class="scanline"></div>
+  <div class="edge-glow-left"></div>
+  <div class="edge-glow-right"></div>
+
+  <div class="chakra-particles" id="particles"></div>
+
+  <div class="corner tl"></div>
+  <div class="corner tr"></div>
+  <div class="corner bl"></div>
+  <div class="corner br"></div>
+
+  <div class="hud-top">
+    <div class="title">SHINOBI VISION</div>
+    <div class="subtitle">忍 · Chakra Detection System · 忍</div>
+  </div>
+
+  <div class="hud-right">
+    <div class="power-panel">
+      <div class="panel-label"><span class="dot"></span>RIGHT HAND</div>
+      <div class="char-name">NARUTO</div>
+      <div class="char-jutsu">九尾 · Nine-Tails Chakra</div>
+      <div class="bar-wrap"><div class="bar-fill" id="bar-n"></div></div>
+      <div class="pct-label" id="pct-n">0%</div>
+      <div class="status-text" id="status-n">STANDBY</div>
+    </div>
+  </div>
+
+  <div class="hud-left">
+    <div class="power-panel">
+      <div class="panel-label"><span class="dot"></span>LEFT HAND</div>
+      <div class="char-name">SASUKE</div>
+      <div class="char-jutsu">写輪眼 · Sharingan Mode</div>
+      <div class="bar-wrap"><div class="bar-fill" id="bar-s"></div></div>
+      <div class="pct-label" id="pct-s">0%</div>
+      <div class="status-text" id="status-s">STANDBY</div>
+    </div>
+  </div>
+
+  <div class="hand-indicator right-ind" id="ind-right">
+    <div class="hand-icon">🤚</div>
+    <div class="hand-label">RIGHT</div>
+  </div>
+
+  <div class="hand-indicator left-ind" id="ind-left">
+    <div class="hand-icon">🤚</div>
+    <div class="hand-label">LEFT</div>
+  </div>
+
+  <div class="hud-bottom">
+    <div class="hud-stat">
+      <div class="s-val" id="stat-hands">0</div>
+      <div class="s-label">Hands Active</div>
+    </div>
+    <div class="hud-sep"></div>
+    <div class="hud-stat">
+      <div class="s-val">MediaPipe</div>
+      <div class="s-label">Engine</div>
+    </div>
+    <div class="hud-sep"></div>
+    <div class="hud-stat">
+      <div class="s-val">LIVE</div>
+      <div class="s-label">Stream</div>
+    </div>
+  </div>
+
+  <video id="n" class="fx" src="assets/naruto.mp4" muted autoplay loop playsinline></video>
+  <video id="s" class="fx" src="assets/sasuke.mp4" muted autoplay loop playsinline></video>
+
+  <script>
+    const vElement = document.getElementById('v_src');
+    const cElement = document.getElementById('out');
+    const ctx = cElement.getContext('2d');
+    const n = document.getElementById('n');
+    const s = document.getElementById('s');
+
+    const barN = document.getElementById('bar-n');
+    const barS = document.getElementById('bar-s');
+    const pctN = document.getElementById('pct-n');
+    const pctS = document.getElementById('pct-s');
+    const statusN = document.getElementById('status-n');
+    const statusS = document.getElementById('status-s');
+    const indLeft = document.getElementById('ind-left');
+    const indRight = document.getElementById('ind-right');
+    const statHands = document.getElementById('stat-hands');
+    const crosshair = document.getElementById('crosshair');
+
+    document.addEventListener('mousemove', (e) => {
+      crosshair.style.left = e.clientX + 'px';
+      crosshair.style.top = e.clientY + 'px';
+    });
+
+    const particleContainer = document.getElementById('particles');
+    function spawnParticle() {
+      const p = document.createElement('div');
+      p.className = 'particle';
+      const size = Math.random() * 4 + 1;
+      const x = Math.random() * window.innerWidth;
+      const duration = Math.random() * 8 + 5;
+      const delay = Math.random() * 3;
+      const drift = (Math.random() - 0.5) * 120;
+      const colors = ['rgba(255,106,0,0.6)', 'rgba(0,245,255,0.5)', 'rgba(123,47,255,0.6)', 'rgba(255,180,0,0.5)'];
+      const color = colors[Math.floor(Math.random() * colors.length)];
+      p.style.cssText = `
+        width:${size}px; height:${size}px;
+        left:${x}px; bottom: -10px;
+        background:${color};
+        box-shadow: 0 0 ${size * 2}px ${color};
+        animation-duration:${duration}s;
+        animation-delay:${delay}s;
+        --drift:${drift};
+      `;
+      particleContainer.appendChild(p);
+      setTimeout(() => p.remove(), (duration + delay) * 1000);
+    }
+    setInterval(spawnParticle, 300);
+
+    const loadScreen = document.getElementById('loading-screen');
+    setTimeout(() => {
+      loadScreen.classList.add('fade-out');
+      setTimeout(() => loadScreen.remove(), 900);
+    }, 2600);
+
+    let pwr = [0, 0];
+    let wasOpen = [false, false];
+
+    function checkOpen(pts) {
+        let count = 0;
+        const wrist = pts[0];
+        const tips = [8, 12, 16, 20];
+        const pips = [6, 10, 14, 18];
+        for (let i = 0; i < tips.length; i++) {
+            const tip = pts[tips[i]];
+            const pip = pts[pips[i]];
+            if (Math.hypot(tip.x - wrist.x, tip.y - wrist.y) > Math.hypot(pip.x - wrist.x, pip.y - wrist.y)) count++;
+        }
+        return count >= 3;
+    }
+
+    function updateHUD(idx, handCount) {
+      const pN = Math.round(pwr[0] * 100);
+      const pS = Math.round(pwr[1] * 100);
+      barN.style.width = pN + '%';
+      barS.style.width = pS + '%';
+      pctN.textContent = pN + '%';
+      pctS.textContent = pS + '%';
+      statusN.textContent = pN > 5 ? 'CHAKRA ACTIVE' : 'STANDBY';
+      statusS.textContent = pS > 5 ? 'CHAKRA ACTIVE' : 'STANDBY';
+      statusN.className = 'status-text' + (pN > 5 ? ' active' : '');
+      statusS.className = 'status-text' + (pS > 5 ? ' active' : '');
+      statHands.textContent = handCount;
+    }
+
+    function onResults(res) {
+        cElement.width = vElement.videoWidth;
+        cElement.height = vElement.videoHeight;
+        ctx.save();
+        ctx.clearRect(0, 0, cElement.width, cElement.height);
+
+        let fL = false;
+        let fR = false;
+        let handCount = 0;
+
+        n.style.display = 'none';
+        s.style.display = 'none';
+
+        if (res.multiHandLandmarks && res.multiHandedness) {
+            handCount = res.multiHandLandmarks.length;
+            res.multiHandLandmarks.forEach((pts, i) => {
+                const label = res.multiHandedness[i].label;
+                const isR = label === 'Right';
+                const idx = isR ? 1 : 0;
+
+                ctx.save();
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = '#00fbff';
+                drawConnectors(ctx, pts, HAND_CONNECTIONS, {color: '#00d4ff', lineWidth: 3});
+                drawLandmarks(ctx, pts, {color: '#ffffff', lineWidth: 1, radius: 2});
+                ctx.restore();
+
+                const open = checkOpen(pts);
+                pwr[idx] += open ? 0.05 : -0.15;
+                pwr[idx] = Math.max(0, Math.min(1, pwr[idx]));
+
+                if (open && !wasOpen[idx]) {
+                    const vid = isR ? s : n;
+                    vid.currentTime = 0;
+                    vid.play();
+                }
+                wasOpen[idx] = open;
+
+                const wrist = pts[0];
+                const knk = pts[9];
+
+                if (isR) {
+                  indRight.classList.add('detected');
+                } else {
+                  indLeft.classList.add('detected');
+                }
+
+                if (pwr[idx] > 0.01) {
+                    if (isR) {
+                        fR = true;
+                        const tx = (wrist.x + knk.x) / 2;
+                        const ty = (wrist.y + knk.y) / 2;
+                        s.style.left = `${(1 - tx) * window.innerWidth}px`;
+                        s.style.top = `${ty * window.innerHeight}px`;
+                        s.style.display = 'block';
+                        s.style.opacity = pwr[idx];
+                    } else {
+                        fL = true;
+                        const dx = knk.x - wrist.x;
+                        const dy = knk.y - wrist.y;
+                        const tx = knk.x + (dx * 0.8);
+                        const ty = knk.y + (dy * 0.8);
+                        n.style.left = `${(1 - tx) * window.innerWidth}px`;
+                        n.style.top = `${(ty * window.innerHeight) - 120}px`;
+                        n.style.display = 'block';
+                        n.style.opacity = pwr[idx];
+                    }
+                }
+            });
+        }
+
+        if (!fL) {
+            indLeft.classList.remove('detected');
+            pwr[0] = Math.max(0, pwr[0] - 0.15);
+            if (pwr[0] > 0.01) { n.style.display = 'block'; n.style.opacity = pwr[0]; }
+            wasOpen[0] = false;
+        }
+        if (!fR) {
+            indRight.classList.remove('detected');
+            pwr[1] = Math.max(0, pwr[1] - 0.15);
+            if (pwr[1] > 0.01) { s.style.display = 'block'; s.style.opacity = pwr[1]; }
+            wasOpen[1] = false;
+        }
+
+        updateHUD(null, handCount);
+        ctx.restore();
+    }
+
+    const h = new Hands({
+        locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+    });
+
+    h.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.65,
+        minTrackingConfidence: 0.65
+    });
+
+    h.onResults(onResults);
+
+    const cam = new Camera(vElement, {
+        onFrame: async () => { await h.send({ image: vElement }); },
+        width: 1280, height: 720
+    });
+    cam.start();
+  </script>
+</body>
+</html>
